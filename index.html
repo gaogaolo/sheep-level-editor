@@ -1,0 +1,1393 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>羊羊移动 - 关卡编辑器 v2</title>
+<style>
+:root { --bg:#0d0e15; --grid:#1c1c28; --panel:#151620; --text:#e0e0e0; --cell:50px; }
+body { font-family:'Segoe UI',sans-serif; background:var(--bg); color:var(--text); display:flex; flex-direction:column; align-items:center; margin:0; padding:20px; user-select:none; }
+.controls { background:var(--panel); padding:15px 25px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,.5); display:flex; gap:10px; align-items:center; margin-bottom:20px; border:1px solid #333; flex-wrap:wrap; }
+input[type="number"] { width:45px; padding:5px; background:#222; border:1px solid #444; color:#fff; border-radius:4px; text-align:center; }
+input[type="text"] { padding:5px 8px; background:#222; border:1px solid #444; color:#fff; border-radius:4px; }
+button { padding:8px 14px; border:none; border-radius:6px; cursor:pointer; font-weight:bold; transition:.2s; font-size:13px; }
+button:active { transform:scale(.95); }
+select { padding:5px 10px; background:#222; border:1px solid #444; color:#fff; border-radius:4px; cursor:pointer; }
+#log { font-size:13px; font-weight:bold; min-width:220px; color:#ffcc00; }
+
+.btn-gen  { background:#ff007f; color:#fff; } .btn-gen:hover  { background:#ff3399; }
+.btn-add  { background:#ffaa00; color:#000; } .btn-add:hover  { background:#ffbb33; }
+.btn-auto { background:#00e5ff; color:#000; } .btn-auto:hover { background:#33eeff; }
+.btn-reset{ background:#555;    color:#fff; } .btn-reset:hover{ background:#666; }
+.btn-block{ background:#9933ff; color:#fff; } .btn-block:hover{ background:#aa55ff; } .btn-block.active{ background:#cc66ff; box-shadow:0 0 10px #9933ff; }
+.btn-clear-block{ background:#ff4444; color:#fff; } .btn-clear-block:hover{ background:#ff6666; }
+.btn-fill-block { background:#6600cc; color:#fff; } .btn-fill-block:hover{ background:#7722dd; }
+.btn-export{ background:#00cc66; color:#fff; } .btn-export:hover{ background:#00ff80; }
+.btn-import{ background:#2196f3; color:#fff; } .btn-import:hover{ background:#42a5f5; }
+.btn-verify{ background:#ff6600; color:#fff; } .btn-verify:hover{ background:#ff8833; }
+.btn-draw  { background:#3399ff; color:#fff; } .btn-draw:hover  { background:#55aaff; } .btn-draw.active{ background:#66bbff; box-shadow:0 0 10px #3399ff; }
+.btn-shape { background:#e91e63; color:#fff; } .btn-shape:hover { background:#f06292; } .btn-shape.active{ background:#f48fb1; box-shadow:0 0 10px #e91e63; }
+
+/* ---- 棋盘 ---- */
+#game-board {
+  position:relative;
+  background-color:var(--grid);
+  border:2px solid #333;
+  box-shadow:0 0 30px rgba(0,0,0,.8);
+  overflow:visible;
+}
+
+/* ---- 动物元素 ---- */
+.animal-el {
+  position:absolute;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  cursor:pointer;
+  z-index:5;
+  border-radius:10px;
+  transition: left 200ms cubic-bezier(.22,.61,.36,1), top 200ms cubic-bezier(.22,.61,.36,1), opacity 200ms ease;
+  will-change: left, top;
+  box-sizing: border-box;
+}
+.animal-el.chicken-el { cursor:default; }
+.animal-el .emoji { line-height:1; display:block; }
+.animal-el .dir-badge {
+  position:absolute;
+  font-size:11px;
+  font-weight:bold;
+  color:rgba(255,255,255,.9);
+  background:rgba(0,0,0,.45);
+  border-radius:4px;
+  padding:1px 3px;
+  pointer-events:none;
+}
+
+/* ---- 禁区 ---- */
+.blocked-cell { position:absolute; background:rgba(153,51,255,.4)!important; border:2px dashed #9933ff!important; box-sizing:border-box; pointer-events:none; z-index:1; }
+.cell-overlay { position:absolute; box-sizing:border-box; z-index:10; cursor:crosshair; }
+.cell-overlay:hover { background:rgba(153,51,255,.3); }
+.cell-overlay.blocked { background:rgba(153,51,255,.5); border:2px dashed #cc66ff; }
+.draw-overlay { position:absolute; box-sizing:border-box; z-index:10; cursor:crosshair; }
+
+/* ---- 动画 ---- */
+@keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-5px)} 75%{transform:translateX(5px)} }
+.shake { animation:shake .3s; filter:brightness(1.6) saturate(1.5); }
+.deadlock-highlight { animation:deadlock-pulse .5s ease-in-out infinite alternate; }
+@keyframes deadlock-pulse { 0%{filter:brightness(1) drop-shadow(0 0 5px #f00)} 100%{filter:brightness(1.5) drop-shadow(0 0 15px #f00)} }
+@keyframes chicken-escape { 0%{transform:scale(1);opacity:1} 60%{transform:scale(1.4) rotate(20deg);opacity:.8} 100%{transform:scale(0) rotate(180deg);opacity:0} }
+.chicken-escaping { animation:chicken-escape .38s ease-in forwards; pointer-events:none; }
+@keyframes pop-in { 0%{transform:scale(0);opacity:0} 70%{transform:scale(1.15)} 100%{transform:scale(1);opacity:1} }
+.pop-in { animation:pop-in .3s cubic-bezier(.34,1.56,.64,1) forwards; }
+
+/* ---- 形状面板 ---- */
+.shape-panel { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,.85); z-index:1000; display:flex; justify-content:center; align-items:center; }
+.shape-panel-content { background:#1a1a2e; border-radius:16px; padding:25px; max-width:400px; width:90%; border:1px solid #444; box-shadow:0 0 40px rgba(233,30,99,.3); }
+.shape-panel-content h3 { margin:0 0 20px; color:#e91e63; text-align:center; font-size:18px; }
+.shape-input-row { display:flex; align-items:center; gap:10px; margin-bottom:15px; flex-wrap:wrap; }
+.shape-input-row label { min-width:100px; color:#aaa; font-size:13px; }
+.shape-preview { margin:20px 0; text-align:center; }
+.shape-preview label { display:block; margin-bottom:10px; color:#aaa; font-size:13px; }
+#shape-preview-canvas { background:#0d0e15; border:1px solid #444; border-radius:8px; image-rendering:pixelated; }
+.shape-actions { display:flex; gap:10px; justify-content:center; margin-top:20px; }
+.shape-actions .btn-apply { background:#4caf50; color:#fff; padding:12px 24px; font-size:14px; }
+.shape-actions .btn-apply:hover { background:#66bb6a; }
+.shape-actions .btn-cancel { background:#f44336; color:#fff; padding:12px 24px; font-size:14px; }
+.shape-actions .btn-cancel:hover { background:#ef5350; }
+</style>
+</head>
+<body>
+
+<div class="controls">
+  <label>R: <input type="number" id="input-rows" value="8"></label>
+  <label>C: <input type="number" id="input-cols" value="8"></label>
+  <label>关卡序号: <input type="number" id="input-level-id" value="1" min="1" style="width:60px;"></label>
+  <label>类型权重(1=鸡,2=羊,3=炸弹羊,4=自爆羊,5=猪): <input type="text" id="input-length-weights" value="1:30,2:50,3:10,4:5,5:5" style="width:310px;text-align:left;"></label>
+  <button class="btn-reset"  onclick="resetBoard()">🧹 重置</button>
+  <button class="btn-block"  id="btn-block-mode" onclick="toggleBlockMode()">🚫 选择禁区</button>
+  <button class="btn-clear-block" onclick="clearBlockedCells()">🗑️ 清除禁区</button>
+  <button class="btn-fill-block"  onclick="fillEmptyCellsAsBlocked()">⬛ 一键填充禁区</button>
+  <button class="btn-gen"    onclick="fillFullMap()">🚀 自动铺满全图</button>
+  <button class="btn-add"    onclick="addSingleAnimal()">➕ 随机加一只</button>
+  <button class="btn-auto"   onclick="autoSolve()">🤖 自动演示</button>
+  <button class="btn-export" onclick="exportLevel()">📤 导出JSON</button>
+  <button class="btn-import" onclick="showImportModal()">📥 导入JSON</button>
+  <input type="file" id="json-upload" accept=".json,application/json" style="display:none" onchange="handleJsonUpload(event)">
+  <button class="btn-verify" onclick="verifyLevel()">🔍 可解性校验</button>
+  <button class="btn-draw"   id="btn-draw-mode" onclick="toggleDrawMode()">✏️ 手动绘制</button>
+  <select id="draw-type">
+    <option value="sheep">🐑 羊 (2格)</option>
+    <option value="chicken">🐔 鸡 (1格)</option>
+    <option value="bomb">💣 炸弹羊 (2格)</option>
+    <option value="timed">⏱️ 自爆羊 (2格)</option>
+    <option value="pig">🐷 猪 (2×2格)</option>
+  </select>
+  <select id="draw-direction">
+    <option value="U">↑ 向上</option>
+    <option value="D">↓ 向下</option>
+    <option value="L">← 向左</option>
+    <option value="R">→ 向右</option>
+  </select>
+  <button class="btn-shape"  id="btn-shape-mode" onclick="toggleShapeMode()">🎨 形状生成</button>
+  <input type="file" id="svg-upload" accept=".svg,image/svg+xml" style="display:none" onchange="handleSvgUpload(event)">
+  <div id="log">就绪</div>
+</div>
+
+<div id="shape-panel" class="shape-panel" style="display:none;">
+  <div class="shape-panel-content">
+    <h3>🎨 形状关卡生成器</h3>
+    <div class="shape-input-row">
+      <label>输入文字/Emoji:</label>
+      <input type="text" id="shape-text" placeholder="例如: ❤️ 或 ABC" maxlength="10" style="width:150px;">
+      <button onclick="generateFromText()">生成</button>
+    </div>
+    <div class="shape-input-row">
+      <label>或上传SVG:</label>
+      <button onclick="document.getElementById('svg-upload').click()">📁 选择SVG文件</button>
+    </div>
+    <div class="shape-input-row">
+      <label>或粘贴SVG代码:</label>
+      <textarea id="svg-code-input" placeholder="直接粘贴SVG代码..." style="width:200px;height:60px;resize:vertical;font-size:11px;background:#0d0e15;color:#e0e0e0;border:1px solid #444;border-radius:4px;padding:4px;"></textarea>
+      <button onclick="generateFromSvgCode()">生成</button>
+    </div>
+    <div class="shape-input-row">
+      <label>形状名称:</label>
+      <input type="text" id="shape-name" placeholder="可选，用于导出" style="width:150px;">
+    </div>
+    <div class="shape-preview">
+      <label>预览:</label>
+      <canvas id="shape-preview-canvas" width="200" height="200"></canvas>
+    </div>
+    <div class="shape-actions">
+      <button class="btn-apply" onclick="applyShapeMask()">✅ 应用形状生成关卡</button>
+      <button class="btn-cancel" onclick="toggleShapeMode()">❌ 取消</button>
+    </div>
+  </div>
+</div>
+
+<div id="game-board"></div>
+
+<script>
+// ============================================================
+// 常量 & 全局状态
+// ============================================================
+const NEON_COLORS = ['#ff6b9d','#00e5ff','#c77dff','#ffaa00','#00ff99','#ff7043','#f72585'];
+const BOMB_COLOR     = '#cc2200';               // 炸弹羊固定颜色（暗红）
+const TIMED_COLOR    = '#ff8c00';               // 自爆羊固定颜色（橙色）
+const PIG_COLOR      = '#f4a0b0';               // 猪固定颜色（粉红）
+const TIMED_INIT_SEC = 300;                     // 自爆羊初始倒计时（秒）
+const TYPE_CELL_COUNT = {1:1, 2:2, 3:2, 4:2, 5:4};  // 类型 → 占用格数
+const DEFAULT_LEN_WEIGHTS = '1:30,2:70';
+let CELL = 50;
+
+let currentAnimals = [];
+let gridMap = [];
+let rows, cols;
+let isPlaying = true;
+let blockedCells = new Set();
+let blockMode = false;
+let drawMode = false;
+let isMouseDown = false;
+let currentDrawingPath = [];
+let shapeMode = false;
+let currentShapeMask = null;
+let timedCountdownInterval = null;  // 自爆羊全局倒计时 interval
+
+// ============================================================
+// 工具函数
+// ============================================================
+function updateLog(msg, color='#ffcc00') {
+  const el = document.getElementById('log');
+  el.innerText = msg; el.style.color = color;
+}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function nextFrame() { return new Promise(r => requestAnimationFrame(() => r())); }
+function isBlocked(r, c) { return blockedCells.has(`${r},${c}`); }
+function isOutside(cell) { return cell.r<0||cell.r>=rows||cell.c<0||cell.c>=cols; }
+
+function getRay(r, c, dir) {
+  const ry=[]; let cr=r, cc=c;
+  while(true) {
+    if(dir==='U')cr--; else if(dir==='D')cr++; else if(dir==='L')cc--; else cc++;
+    if(cr<0||cr>=rows||cc<0||cc>=cols) break;
+    ry.push({r:cr,c:cc});
+  }
+  return ry;
+}
+
+// 猪射线：从 2×2 块的前方两格出发，成对存储（每步两个格子）
+function getPigRay(topR, topC, dir) {
+  const ry = [];
+  for(let step=1;;step++) {
+    let r1,c1,r2,c2;
+    if(dir==='U')      { r1=topR-step;     c1=topC;       r2=topR-step;     c2=topC+1; }
+    else if(dir==='D') { r1=topR+1+step;   c1=topC;       r2=topR+1+step;   c2=topC+1; }
+    else if(dir==='L') { r1=topR;          c1=topC-step;  r2=topR+1;        c2=topC-step; }
+    else               { r1=topR;          c1=topC+1+step;r2=topR+1;        c2=topC+1+step; }
+    if(r1<0||r1>=rows||c1<0||c1>=cols||r2<0||r2>=rows||c2<0||c2>=cols) break;
+    ry.push({r:r1,c:c1},{r:r2,c:c2});
+  }
+  return ry;
+}
+
+// 从 path 中取出猪 2×2 块的左上角
+function pigTopLeft(path) {
+  return {r:Math.min(...path.map(p=>p.r)), c:Math.min(...path.map(p=>p.c))};
+}
+
+// 生成猪所有合法放置方案（以 (r,c) 为其中一格，枚举 4 个左上角 × 4 个方向）
+function getPigPlacements(r, c) {
+  const results=[];
+  for(const [dr,dc] of [[0,0],[0,-1],[-1,0],[-1,-1]]) {
+    const tr=r+dr, tc=c+dc;
+    const cells=[{r:tr,c:tc},{r:tr,c:tc+1},{r:tr+1,c:tc},{r:tr+1,c:tc+1}];
+    if(cells.some(p=>p.r<0||p.r>=rows||p.c<0||p.c>=cols)) continue;
+    if(cells.some(p=>gridMap[p.r][p.c]!==null||isBlocked(p.r,p.c))) continue;
+    for(const dir of ['U','D','L','R']) results.push({path:cells,dir});
+  }
+  return results;
+}
+
+function readWeightedConfig(inputId, defaultText) {
+  const el = document.getElementById(inputId);
+  if(!el) return parseWeightedText(defaultText);
+  const text = (el.value||'').trim();
+  const parsed = parseWeightedText(text);
+  if(!Object.keys(parsed).length) { el.value=defaultText; return parseWeightedText(defaultText); }
+  return parsed;
+}
+function parseWeightedText(text) {
+  const out={};
+  if(!text) return out;
+  for(const raw of text.split(',')) {
+    const part=raw.trim(); if(!part) continue;
+    const [kT,wT]=part.split(':').map(s=>(s||'').trim());
+    const key=Number(kT), weight=Number(wT);
+    if(!Number.isFinite(key)||!Number.isFinite(weight)||weight<=0) continue;
+    out[Math.floor(key)]=weight;
+  }
+  return out;
+}
+function buildWeightedOrder(items, weightMap) {
+  const pool=[...items], order=[];
+  while(pool.length) {
+    let total=0; for(const i of pool) total+=(weightMap[i]||0);
+    if(total<=0) { pool.sort(()=>Math.random()-.5); order.push(...pool); break; }
+    let pick=Math.random()*total, idx=0;
+    for(let i=0;i<pool.length;i++) { pick-=(weightMap[pool[i]]||0); if(pick<=0){idx=i;break;} }
+    order.push(pool[idx]); pool.splice(idx,1);
+  }
+  return order;
+}
+function getRegionSize(r, c) {
+  if(gridMap[r][c]!==null||isBlocked(r,c)) return 0;
+  const visited=new Set(), queue=[{r,c}]; visited.add(`${r},${c}`);
+  while(queue.length) {
+    const cur=queue.shift();
+    for(const n of [{r:cur.r-1,c:cur.c},{r:cur.r+1,c:cur.c},{r:cur.r,c:cur.c-1},{r:cur.r,c:cur.c+1}]) {
+      const key=`${n.r},${n.c}`;
+      if(n.r>=0&&n.r<rows&&n.c>=0&&n.c<cols&&!visited.has(key)&&gridMap[n.r][n.c]===null&&!isBlocked(n.r,n.c)) {
+        visited.add(key); queue.push(n);
+      }
+    }
+  }
+  return visited.size;
+}
+
+// ============================================================
+// 鸡的逃脱检测：BFS 连通性判断
+// 羊（含炸弹羊）和禁区是墙壁；其他鸡也是墙壁（鸡不能穿过鸡）。
+// 只要有任意一条连通路径通向地图边界，鸡就能逃脱。
+// ============================================================
+function canChickenEscape(chicken, animals, grid) {
+  // 构建所有阻挡格子的 Set：羊、炸弹羊、其他鸡都是墙
+  const wallSet = new Set();
+  for(const a of animals) {
+    if(a.id === chicken.id) continue;
+    for(const p of a.path) wallSet.add(`${p.r},${p.c}`);
+  }
+  function isWall(r, c) {
+    if(r<0||r>=rows||c<0||c>=cols) return true;
+    if(isBlocked(r,c)) return true;
+    return wallSet.has(`${r},${c}`);
+  }
+  const start = chicken.path[0];
+  // 若起点已在边界，步出地图即可逃出
+  if(start.r===0||start.r===rows-1||start.c===0||start.c===cols-1) return true;
+  const visited = new Set([`${start.r},${start.c}`]);
+  const queue = [{r:start.r,c:start.c}];
+  while(queue.length) {
+    const {r,c} = queue.shift();
+    for(const [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+      const nr=r+dr, nc=c+dc;
+      if(nr<0||nr>=rows||nc<0||nc>=cols) return true; // 踏出边界 → 逃脱
+      if(isWall(nr,nc)) continue;
+      const key=`${nr},${nc}`;
+      if(visited.has(key)) continue;
+      visited.add(key);
+      if(nr===0||nr===rows-1||nc===0||nc===cols-1) return true;
+      queue.push({r:nr,c:nc});
+    }
+  }
+  return false;
+}
+// 保持旧名称兼容性（返回 'U' 或 null，调用方只关心是否为 null）
+function getChickenFreeDir(chicken, animals, grid) {
+  return canChickenEscape(chicken, animals, grid) ? 'U' : null;
+}
+
+// ============================================================
+// 快速求解检查
+// ============================================================
+function quickSolveCheck(animals, grid) {
+  let remaining = animals.map(a=>({...a,path:[...a.path],ray:[...a.ray]}));
+  const g = grid.map(row=>[...row]);
+  let maxIter=animals.length*3+10, iter=0;
+  while(remaining.length>0&&iter<maxIter) {
+    iter++;
+    let found=false;
+    for(let i=remaining.length-1;i>=0;i--) {
+      const a=remaining[i];
+      let canRemove=false;
+      if(a.type==='sheep'||a.type==='bomb'||a.type==='timed') {
+        // 羊/炸弹羊/自爆羊：射线上无任何动物即可消除
+        canRemove = !a.ray.some(rc=>g[rc.r][rc.c]!==null&&g[rc.r][rc.c]!==a.id);
+      } else if(a.type==='pig') {
+        // 猪：射线成对，每步两格都必须空
+        canRemove = true;
+        for(let si=0;si<a.ray.length;si+=2) {
+          const c1=a.ray[si], c2=a.ray[si+1];
+          const b1=g[c1.r][c1.c], b2=g[c2.r][c2.c];
+          if((b1!==null&&b1!==a.id)||(b2!==null&&b2!==a.id)){canRemove=false;break;}
+        }
+      } else {
+        canRemove = getChickenFreeDir(a,remaining,g)!==null;
+      }
+      if(canRemove) { a.path.forEach(p=>g[p.r][p.c]=null); remaining.splice(i,1); found=true; break; }
+    }
+    if(!found) break;
+  }
+  return {solved:remaining.length===0};
+}
+
+// ============================================================
+// 路径生成（直线，长度1或2）
+// ============================================================
+function getStraightPaths(r, c, len) {
+  if(len===1) return [[{r,c}]];
+  const paths=[];
+  for(const [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+    const nr=r+dr, nc=c+dc;
+    if(nr>=0&&nr<rows&&nc>=0&&nc<cols&&gridMap[nr][nc]===null&&!isBlocked(nr,nc))
+      paths.push([{r,c},{r:nr,c:nc}]);
+  }
+  return paths;
+}
+function getDirFromPath(path) {
+  if(path.length<2) return null;
+  const dr=path[0].r-path[1].r, dc=path[0].c-path[1].c;
+  if(dr<0) return 'U'; if(dr>0) return 'D'; if(dc<0) return 'L'; return 'R';
+}
+
+// ============================================================
+// 验证并存储
+// ============================================================
+function validateAndStore(path, type, dir) {
+  if(path.some(p=>gridMap[p.r][p.c]!==null)) return false;
+  const newId=currentAnimals.length;
+  const isSheepLike = type==='sheep'||type==='bomb'||type==='timed'||type==='pig';
+  let ray;
+  if(type==='pig') {
+    const tl=pigTopLeft(path);
+    ray=getPigRay(tl.r,tl.c,dir);
+  } else {
+    ray = isSheepLike ? getRay(path[0].r,path[0].c,dir) : [];
+  }
+  if(isSheepLike && ray.some(rc=>path.some(p=>p.r===rc.r&&p.c===rc.c))) return false;
+
+  const simAnimals=currentAnimals.map(a=>({...a,path:[...a.path],ray:[...a.ray]}));
+  simAnimals.push({id:newId,type,dir,path:[...path],ray,color:NEON_COLORS[0]});
+  const simGrid=gridMap.map(row=>[...row]);
+  path.forEach(p=>simGrid[p.r][p.c]=newId);
+  if(!quickSolveCheck(simAnimals,simGrid).solved) return false;
+
+  const color = type==='bomb'?BOMB_COLOR:type==='timed'?TIMED_COLOR:type==='pig'?PIG_COLOR:NEON_COLORS[newId%NEON_COLORS.length];
+  const animal={id:newId,type,dir,path,ray,color};
+  if(type==='bomb') animal.bombCount=3;
+  if(type==='timed') animal.timedSec=TIMED_INIT_SEC;
+  currentAnimals.push(animal);
+  path.forEach(p=>gridMap[p.r][p.c]=newId);
+  return true;
+}
+
+// ============================================================
+// 核心生成：单阶段，全程按权重
+// ============================================================
+async function performSingleAdd(shouldRender=true) {
+  const lenWeights = readWeightedConfig('input-length-weights', DEFAULT_LEN_WEIGHTS);
+  let emptyCells=[];
+  for(let r=0;r<rows;r++) for(let c=0;c<cols;c++) {
+    if(gridMap[r][c]===null&&!isBlocked(r,c)) {
+      emptyCells.push({r,c,dist:Math.min(r,rows-1-r,c,cols-1-c)});
+    }
+  }
+  if(!emptyCells.length) return false;
+  emptyCells.sort((a,b)=>a.dist-b.dist+(Math.random()*.4-.2));
+
+  const candidateTypes=Object.keys(lenWeights).map(Number).filter(l=>Number.isInteger(l)&&l>=1&&l<=5);
+  const baseTypes=candidateTypes.length?candidateTypes:[1,2];
+  const candidates=emptyCells.slice(0,30);
+
+  for(const start of candidates) {
+    const regionSize=getRegionSize(start.r,start.c);
+    if(!regionSize) continue;
+    const typesToUse=baseTypes.filter(t=>(TYPE_CELL_COUNT[t]||1)<=regionSize);
+    if(!typesToUse.length) continue;
+    const typeOrder=buildWeightedOrder(typesToUse,lenWeights);
+
+    for(const type of typeOrder) {
+      if(type===5) {
+        // 猪：枚举所有合法 2×2 放置方案
+        const placements=getPigPlacements(start.r,start.c).sort(()=>Math.random()-.5);
+        for(const {path,dir} of placements) {
+          if(validateAndStore(path,'pig',dir)) {
+            if(shouldRender) renderAnimal(currentAnimals[currentAnimals.length-1]);
+            return true;
+          }
+        }
+      } else {
+        const cellCount=TYPE_CELL_COUNT[type]||1;
+        const paths=getStraightPaths(start.r,start.c,cellCount).sort(()=>Math.random()-.5);
+        for(const path of paths) {
+          if(type===1) {
+            if(validateAndStore(path,'chicken',null)) {
+              if(shouldRender) renderAnimal(currentAnimals[currentAnimals.length-1]);
+              return true;
+            }
+          } else {
+            const dir=getDirFromPath(path);
+            const animalType=type===3?'bomb':type===4?'timed':'sheep';
+            if(dir&&validateAndStore(path,animalType,dir)) {
+              if(shouldRender) renderAnimal(currentAnimals[currentAnimals.length-1]);
+              return true;
+            }
+          }
+        }
+      }
+    }
+  }
+  return false;
+}
+
+// ============================================================
+// 地图初始化
+// ============================================================
+function resetBoard() {
+  rows = parseInt(document.getElementById('input-rows').value);
+  cols = parseInt(document.getElementById('input-cols').value);
+  CELL = 50;
+  const board = document.getElementById('game-board');
+  board.style.width  = `${cols*CELL}px`;
+  board.style.height = `${rows*CELL}px`;
+  // 用 CSS 背景绘制网格线
+  board.style.backgroundSize = `${CELL}px ${CELL}px`;
+  board.style.backgroundImage = `linear-gradient(to right,#2a2a3a 1px,transparent 1px),linear-gradient(to bottom,#2a2a3a 1px,transparent 1px)`;
+  board.innerHTML = '';
+  gridMap = Array.from({length:rows},()=>Array(cols).fill(null));
+  currentAnimals = [];
+  isPlaying = true;
+  stopTimedCountdown();
+  if(blockMode) createCellOverlays();
+  updateLog('地图已清空');
+}
+
+// ============================================================
+// 自动铺满全图（单阶段）
+// ============================================================
+async function fillFullMap() {
+  resetBoard();
+  updateLog('正在生成关卡...');
+  let failCount=0;
+  while(failCount<40) {
+    const ok = await performSingleAdd(false);
+    if(ok) failCount=0; else failCount++;
+    if(currentAnimals.length%10===0) await sleep(0);
+  }
+  renderBlockedCells();
+  const layers=groupByLayer(currentAnimals);
+  const layerMs=Math.max(60,1000/Math.max(layers.length,1));
+  for(const layer of layers) await Promise.all(layer.map(a=>renderAnimalAnim(a,layerMs)));
+  await silentRemoveChickens();
+  startTimedCountdown();
+  updateLog(`✅ 填充完毕，共 ${currentAnimals.length} 只动物`,'#00ff66');
+}
+
+async function addSingleAnimal() {
+  if(!gridMap.length) resetBoard();
+  const ok = await performSingleAdd(true);
+  if(ok) {
+    startTimedCountdown(); // 若新加的是自爆羊，确保倒计时已启动
+    updateLog(`✅ 已添加第 ${currentAnimals.length} 只`,'#00ff66');
+  }
+  else updateLog('⚠️ 找不到合法位置','#ff8800');
+}
+
+// ============================================================
+// 视觉渲染：emoji 横跨格子
+// ============================================================
+
+// 根据方向计算羊/猪元素的位置和尺寸
+// 羊：path[0]=头，path[1]=身体；猪：path 为 2×2 块
+function getSheepStyle(a) {
+  if(a.type==='pig') {
+    const tl=pigTopLeft(a.path);
+    return {left:tl.c*CELL, top:tl.r*CELL, width:2*CELL, height:2*CELL};
+  }
+  const h=a.path[0], b=a.path[1];
+  const dir=a.dir;
+  let left, top, width, height;
+  if(dir==='R'||dir==='L') {
+    left  = Math.min(h.c,b.c)*CELL;
+    top   = h.r*CELL;
+    width = 2*CELL;
+    height= CELL;
+  } else {
+    left  = h.c*CELL;
+    top   = Math.min(h.r,b.r)*CELL;
+    width = CELL;
+    height= 2*CELL;
+  }
+  return {left,top,width,height};
+}
+
+// ============================================================
+// SVG 绘制：俯视角羊（背面朝上，头部指向移动方向）
+// ============================================================
+function blendWithWhite(hex, t) {
+  const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+  return `rgb(${Math.round(r+(255-r)*t)},${Math.round(g+(255-g)*t)},${Math.round(b+(255-b)*t)})`;
+}
+function makeSheepSVG(color, dir, w, h, bombCount=null, timerSec=null) {
+  const minS=Math.min(w,h);
+  const bR=minS*0.37, hR=minS*0.175, gap=bR*0.15;
+  let bcX,bcY,hcX,hcY;
+  if(dir==='R'){      bcX=w*0.38; bcY=h/2;    hcX=bcX+bR+gap+hR; hcY=h/2;  }
+  else if(dir==='L'){ bcX=w*0.62; bcY=h/2;    hcX=bcX-bR-gap-hR; hcY=h/2;  }
+  else if(dir==='U'){ bcX=w/2;    bcY=h*0.62; hcX=w/2;  hcY=bcY-bR-gap-hR; }
+  else{               bcX=w/2;    bcY=h*0.38; hcX=w/2;  hcY=bcY+bR+gap+hR; }
+  const pad=hR+2;
+  hcX=Math.max(pad,Math.min(w-pad,hcX));
+  hcY=Math.max(pad,Math.min(h-pad,hcY));
+  // 绒毛凸起：在主圆周围均匀排列小圆，营造蓬松感
+  const bCount=10, bumpR=(bR*0.32).toFixed(1);
+  let bumps='';
+  for(let i=0;i<bCount;i++){
+    const ang=(i/bCount)*Math.PI*2;
+    bumps+=`<circle cx="${(bcX+bR*Math.cos(ang)).toFixed(1)}" cy="${(bcY+bR*Math.sin(ang)).toFixed(1)}" r="${bumpR}" fill="${color}"/>`;
+  }
+  // 眼睛位置
+  const eD=hR*0.45;
+  let e1x,e1y,e2x,e2y;
+  if(dir==='R'||dir==='L'){e1x=hcX;e1y=hcY-eD;e2x=hcX;e2y=hcY+eD;}
+  else{e1x=hcX-eD;e1y=hcY;e2x=hcX+eD;e2y=hcY;}
+  const light=blendWithWhite(color,0.38);
+  const f=v=>v.toFixed(1);
+  // 炸弹羊：在毛体中央显示爆炸次数倒计时徽章
+  const bombBadge = bombCount!==null
+    ? `<circle cx="${f(bcX)}" cy="${f(bcY)}" r="${f(bR*.44)}" fill="rgba(0,0,0,0.75)"/>`
+      +`<text x="${f(bcX)}" y="${f(bcY)}" text-anchor="middle" dominant-baseline="central" `
+      +`font-family="Arial,sans-serif" font-size="${f(bR*.9)}" font-weight="bold" fill="${bombCount<=1?'#ff2200':bombCount<=2?'#ffaa00':'#ffffff'}">${bombCount}</text>`
+    : '';
+  // 自爆羊：在毛体中央显示秒数倒计时徽章（颜色随时间变化）
+  const timerBadge = timerSec!==null
+    ? (() => {
+        const tc = timerSec>120?'#ffffff':timerSec>60?'#ffee00':timerSec>20?'#ff8800':'#ff2200';
+        const fs = timerSec>=100 ? f(bR*.62) : f(bR*.82);
+        return `<circle cx="${f(bcX)}" cy="${f(bcY)}" r="${f(bR*.48)}" fill="rgba(0,0,0,0.78)"/>`
+          +`<text x="${f(bcX)}" y="${f(bcY)}" text-anchor="middle" dominant-baseline="central" `
+          +`font-family="Arial,sans-serif" font-size="${fs}" font-weight="bold" fill="${tc}">${timerSec}</text>`;
+      })()
+    : '';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 ${w} ${h}">
+    ${bumps}
+    <circle cx="${f(bcX)}" cy="${f(bcY)}" r="${f(bR)}" fill="${color}"/>
+    <circle cx="${f(bcX-bR*.2)}" cy="${f(bcY-bR*.2)}" r="${f(bR*.45)}" fill="${light}" opacity="0.5"/>
+    ${bombBadge}${timerBadge}
+    <circle cx="${f(hcX)}" cy="${f(hcY)}" r="${f(hR)}" fill="#3a2010"/>
+    <circle cx="${f(e1x)}" cy="${f(e1y)}" r="2.5" fill="white"/>
+    <circle cx="${f(e2x)}" cy="${f(e2y)}" r="2.5" fill="white"/>
+    <circle cx="${f(e1x)}" cy="${f(e1y)}" r="1.2" fill="#111"/>
+    <circle cx="${f(e2x)}" cy="${f(e2y)}" r="1.2" fill="#111"/></svg>`;
+}
+
+// ============================================================
+// SVG 绘制：俯视角猪（2×2，头部指向移动方向）
+// ============================================================
+function makePigSVG(color, dir, w, h) {
+  const f=v=>v.toFixed(1);
+  const cx=w/2, cy=h/2;
+  const bodyR=Math.min(w,h)*0.30;
+  const headR=Math.min(w,h)*0.19;
+  const earR =Math.min(w,h)*0.09;   // 小圆耳
+  const snoutR=headR*0.52;           // 圆鼻子
+  let bCx,bCy,hCx,hCy,earPts,tailPath,snoutX,snoutY;
+  if(dir==='U'){
+    bCx=cx; bCy=cy+bodyR*0.15; hCx=cx; hCy=cy-bodyR*0.68;
+    earPts=[[hCx-headR*0.72,hCy-headR*0.55],[hCx+headR*0.72,hCy-headR*0.55]];
+    snoutX=hCx; snoutY=hCy-headR*0.18;
+    tailPath=`M${f(bCx)},${f(bCy+bodyR*0.75)} Q${f(bCx+bodyR*0.55)},${f(bCy+bodyR*1.05)} ${f(bCx+bodyR*0.3)},${f(bCy+bodyR*0.55)}`;
+  } else if(dir==='D'){
+    bCx=cx; bCy=cy-bodyR*0.15; hCx=cx; hCy=cy+bodyR*0.68;
+    earPts=[[hCx-headR*0.72,hCy+headR*0.55],[hCx+headR*0.72,hCy+headR*0.55]];
+    snoutX=hCx; snoutY=hCy+headR*0.18;
+    tailPath=`M${f(bCx)},${f(bCy-bodyR*0.75)} Q${f(bCx-bodyR*0.55)},${f(bCy-bodyR*1.05)} ${f(bCx-bodyR*0.3)},${f(bCy-bodyR*0.55)}`;
+  } else if(dir==='L'){
+    bCx=cx+bodyR*0.15; bCy=cy; hCx=cx-bodyR*0.68; hCy=cy;
+    earPts=[[hCx-headR*0.55,hCy-headR*0.72],[hCx-headR*0.55,hCy+headR*0.72]];
+    snoutX=hCx-headR*0.18; snoutY=hCy;
+    tailPath=`M${f(bCx+bodyR*0.75)},${f(bCy)} Q${f(bCx+bodyR*1.05)},${f(bCy-bodyR*0.55)} ${f(bCx+bodyR*0.55)},${f(bCy-bodyR*0.3)}`;
+  } else {
+    bCx=cx-bodyR*0.15; bCy=cy; hCx=cx+bodyR*0.68; hCy=cy;
+    earPts=[[hCx+headR*0.55,hCy-headR*0.72],[hCx+headR*0.55,hCy+headR*0.72]];
+    snoutX=hCx+headR*0.18; snoutY=hCy;
+    tailPath=`M${f(bCx-bodyR*0.75)},${f(bCy)} Q${f(bCx-bodyR*1.05)},${f(bCy+bodyR*0.55)} ${f(bCx-bodyR*0.55)},${f(bCy+bodyR*0.3)}`;
+  }
+  const light=blendWithWhite(color,0.40);
+  const snoutColor=blendWithWhite(color,-0.12); // 鼻子略深
+  // 鼻孔偏移（沿朝向方向）
+  const nd=snoutR*0.32;
+  let n1x,n1y,n2x,n2y;
+  if(dir==='U'||dir==='D'){n1x=snoutX-nd;n1y=snoutY;n2x=snoutX+nd;n2y=snoutY;}
+  else{n1x=snoutX;n1y=snoutY-nd;n2x=snoutX;n2y=snoutY+nd;}
+  // 眼睛
+  const eD=headR*0.36;
+  let e1x,e1y,e2x,e2y;
+  if(dir==='U'||dir==='D'){e1x=hCx-eD;e1y=hCy;e2x=hCx+eD;e2y=hCy;}
+  else{e1x=hCx;e1y=hCy-eD;e2x=hCx;e2y=hCy+eD;}
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 ${w} ${h}">
+    <circle cx="${f(bCx)}" cy="${f(bCy)}" r="${f(bodyR)}" fill="${color}"/>
+    <circle cx="${f(bCx-bodyR*0.15)}" cy="${f(bCy-bodyR*0.15)}" r="${f(bodyR*0.48)}" fill="${light}" opacity="0.38"/>
+    <path d="${tailPath}" stroke="${color}" stroke-width="${f(headR*0.38)}" fill="none" stroke-linecap="round"/>
+    <circle cx="${f(earPts[0][0])}" cy="${f(earPts[0][1])}" r="${f(earR)}" fill="${color}"/>
+    <circle cx="${f(earPts[1][0])}" cy="${f(earPts[1][1])}" r="${f(earR)}" fill="${color}"/>
+    <circle cx="${f(hCx)}" cy="${f(hCy)}" r="${f(headR)}" fill="${color}"/>
+    <circle cx="${f(snoutX)}" cy="${f(snoutY)}" r="${f(snoutR)}" fill="${snoutColor}" opacity="0.85"/>
+    <circle cx="${f(n1x)}" cy="${f(n1y)}" r="${f(snoutR*0.22)}" fill="#a0506a" opacity="0.7"/>
+    <circle cx="${f(n2x)}" cy="${f(n2y)}" r="${f(snoutR*0.22)}" fill="#a0506a" opacity="0.7"/>
+    <circle cx="${f(e1x)}" cy="${f(e1y)}" r="2.6" fill="white"/>
+    <circle cx="${f(e2x)}" cy="${f(e2y)}" r="2.6" fill="white"/>
+    <circle cx="${f(e1x)}" cy="${f(e1y)}" r="1.3" fill="#111"/>
+    <circle cx="${f(e2x)}" cy="${f(e2y)}" r="1.3" fill="#111"/></svg>`;
+}
+
+function renderAnimal(a) {
+  const board = document.getElementById('game-board');
+  const el = document.createElement('div');
+  el.id = `a-${a.id}`;
+  el.className = `animal-el ${a.type==='chicken'?'chicken-el':''}`;
+
+  if(a.type==='sheep'||a.type==='bomb'||a.type==='timed') {
+    const {left,top,width,height} = getSheepStyle(a);
+    el.style.left   = `${left}px`;
+    el.style.top    = `${top}px`;
+    el.style.width  = `${width}px`;
+    el.style.height = `${height}px`;
+    // 用 SVG 绘制俯视角羊，毛色即为区分色；炸弹羊传入剩余次数，自爆羊传入剩余秒数
+    el.innerHTML = makeSheepSVG(a.color, a.dir, width, height,
+      a.type==='bomb'?a.bombCount:null,
+      a.type==='timed'?a.timedSec:null);
+    el.onclick = () => tryRemoveSheep(a);
+  } else if(a.type==='pig') {
+    const {left,top,width,height} = getSheepStyle(a);
+    el.style.left   = `${left}px`;
+    el.style.top    = `${top}px`;
+    el.style.width  = `${width}px`;
+    el.style.height = `${height}px`;
+    el.innerHTML = makePigSVG(a.color, a.dir, width, height);
+    el.onclick = () => tryRemoveSheep(a);
+  } else {
+    // 鸡：单格，纯 emoji，无颜色框
+    el.style.left   = `${a.path[0].c*CELL}px`;
+    el.style.top    = `${a.path[0].r*CELL}px`;
+    el.style.width  = `${CELL}px`;
+    el.style.height = `${CELL}px`;
+    const emojiSpan = document.createElement('span');
+    emojiSpan.className = 'emoji';
+    emojiSpan.style.fontSize = `${CELL*0.62}px`;
+    emojiSpan.textContent = '🐔';
+    el.appendChild(emojiSpan);
+  }
+
+  board.appendChild(el);
+  return el;
+}
+
+// 带入场动画的渲染（从头部方向外侧滑入）
+async function renderAnimalAnim(a, totalMs) {
+  const el = renderAnimal(a);
+  const cellMs = Math.max(40, totalMs);
+
+  if(a.type==='sheep'||a.type==='bomb'||a.type==='timed'||a.type==='pig') {
+    const {left,top} = getSheepStyle(a);
+    const delta = {U:{r:-1,c:0},D:{r:1,c:0},L:{r:0,c:-1},R:{r:0,c:1}}[a.dir];
+    const startLeft = left + delta.c*CELL;
+    const startTop  = top  + delta.r*CELL;
+    el.style.transition = 'none';
+    el.style.opacity = '0';
+    el.style.left = `${startLeft}px`;
+    el.style.top  = `${startTop}px`;
+    await nextFrame();
+    el.style.transition = `left ${cellMs}ms cubic-bezier(.22,.61,.36,1), top ${cellMs}ms cubic-bezier(.22,.61,.36,1), opacity ${cellMs*0.6}ms ease`;
+    el.style.opacity = '1';
+    el.style.left = `${left}px`;
+    el.style.top  = `${top}px`;
+    await sleep(cellMs+20);
+  } else {
+    el.style.transform = 'scale(0)';
+    el.style.opacity = '0';
+    await nextFrame();
+    el.classList.add('pop-in');
+    await sleep(320);
+    el.classList.remove('pop-in');
+    el.style.transform = '';
+    el.style.opacity = '1';
+  }
+}
+
+// 刷新炸弹羊的 SVG（次数变化后调用）
+function refreshBombSVG(a) {
+  const el = document.getElementById(`a-${a.id}`);
+  if(!el) return;
+  const {width,height} = getSheepStyle(a);
+  el.innerHTML = makeSheepSVG(a.color, a.dir, width, height, a.bombCount);
+}
+
+// 刷新自爆羊的 SVG（秒数变化后调用）
+function refreshTimedSVG(a) {
+  const el = document.getElementById(`a-${a.id}`);
+  if(!el) return;
+  const {width,height} = getSheepStyle(a);
+  el.innerHTML = makeSheepSVG(a.color, a.dir, width, height, null, a.timedSec);
+}
+
+// 启动自爆羊全局倒计时（每秒 tick 一次）
+function startTimedCountdown() {
+  stopTimedCountdown(); // 防止重复
+  const hasTimed = () => currentAnimals.some(a=>a.type==='timed');
+  if(!hasTimed()) return;
+  timedCountdownInterval = setInterval(() => {
+    if(!isPlaying) return;
+    let exploded = false;
+    for(const a of currentAnimals) {
+      if(a.type!=='timed') continue;
+      a.timedSec--;
+      refreshTimedSVG(a);
+      if(a.timedSec<=0) { exploded=true; break; }
+    }
+    if(exploded) {
+      stopTimedCountdown();
+      showTimedFailModal();
+    } else if(!hasTimed()) {
+      stopTimedCountdown();
+    }
+  }, 1000);
+}
+
+// 停止自爆羊倒计时
+function stopTimedCountdown() {
+  if(timedCountdownInterval!==null) {
+    clearInterval(timedCountdownInterval);
+    timedCountdownInterval=null;
+  }
+}
+
+// 失败弹窗（自爆羊版）
+function showTimedFailModal() {
+  isPlaying = false;
+  const overlay = document.createElement('div');
+  overlay.id = 'fail-overlay';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.82);z-index:2000;display:flex;justify-content:center;align-items:center;';
+  overlay.innerHTML = `<div style="background:#1a0a00;border-radius:16px;padding:36px 40px;text-align:center;border:2px solid #ff8c00;box-shadow:0 0 40px rgba(255,140,0,.6);max-width:340px;">
+    <div style="font-size:52px;margin-bottom:12px;">⏱️💥</div>
+    <h2 style="color:#ff8c00;margin:0 0 10px;font-size:22px;">自爆羊爆炸！</h2>
+    <p style="color:#e0e0e0;margin:0 0 24px;font-size:14px;">未能在倒计时结束前消除自爆羊，关卡失败。</p>
+    <button onclick="restartLevel()" style="background:#ff8c00;color:#fff;border:none;border-radius:8px;padding:12px 32px;font-size:15px;font-weight:bold;cursor:pointer;">🔄 重新开始</button>
+  </div>`;
+  document.body.appendChild(overlay);
+}
+
+// 失败弹窗
+function showFailModal() {
+  isPlaying = false;
+  const overlay = document.createElement('div');
+  overlay.id = 'fail-overlay';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.82);z-index:2000;display:flex;justify-content:center;align-items:center;';
+  overlay.innerHTML = `<div style="background:#1a0a0a;border-radius:16px;padding:36px 40px;text-align:center;border:2px solid #cc2200;box-shadow:0 0 40px rgba(204,34,0,.6);max-width:340px;">
+    <div style="font-size:52px;margin-bottom:12px;">💥</div>
+    <h2 style="color:#ff4422;margin:0 0 10px;font-size:22px;">炸弹爆炸！</h2>
+    <p style="color:#e0e0e0;margin:0 0 24px;font-size:14px;">炸弹羊的爆炸次数归零，关卡失败。</p>
+    <button onclick="restartLevel()" style="background:#cc2200;color:#fff;border:none;border-radius:8px;padding:12px 32px;font-size:15px;font-weight:bold;cursor:pointer;">🔄 重新开始</button>
+  </div>`;
+  document.body.appendChild(overlay);
+}
+function restartLevel() {
+  const o = document.getElementById('fail-overlay');
+  if(o) o.remove();
+  resetBoard();
+}
+
+function groupByLayer(animals) {
+  const withDist=animals.map(a=>({a,dist:Math.min(...a.path.map(p=>Math.min(p.r,rows-1-p.r,p.c,cols-1-p.c)))}));
+  withDist.sort((x,y)=>x.dist-y.dist);
+  const layers=[]; let cur=[],curDist=-1;
+  for(const {a,dist} of withDist) {
+    if(dist!==curDist){if(cur.length)layers.push(cur);cur=[a];curDist=dist;}
+    else cur.push(a);
+  }
+  if(cur.length)layers.push(cur);
+  return layers;
+}
+
+// ============================================================
+// 游戏逻辑：羊的点击 → 滑动 / 消失
+// ============================================================
+const DIR_DELTA = {U:{r:-1,c:0},D:{r:1,c:0},L:{r:0,c:-1},R:{r:0,c:1}};
+
+// 触发炸弹羊扣次数（被撞或被点击时阻挡）
+async function triggerBomb(bomb) {
+  bomb.bombCount--;
+  refreshBombSVG(bomb);
+  // 震动提示
+  const bel = document.getElementById(`a-${bomb.id}`);
+  if(bel){ bel.classList.remove('shake'); void bel.offsetWidth; bel.classList.add('shake'); }
+  await sleep(80);
+  if(bomb.bombCount<=0) {
+    await sleep(120);
+    showFailModal();
+  }
+}
+
+async function tryRemoveSheep(a) {
+  if(!isPlaying) return;
+  const el = document.getElementById(`a-${a.id}`);
+  if(!el) return;
+
+  // ===== 猪：成对射线，每步检查两格 =====
+  if(a.type==='pig') {
+    const tl=pigTopLeft(a.path);
+    // 计算能滑动几步（每步 = 前方两个格子都空）
+    let slideSteps=0;
+    for(let si=0;si<a.ray.length;si+=2) {
+      const c1=a.ray[si], c2=a.ray[si+1];
+      if(gridMap[c1.r][c1.c]===null && gridMap[c2.r][c2.c]===null) slideSteps++;
+      else break;
+    }
+    const totalPairs=a.ray.length/2;
+    const canExit=(slideSteps===totalPairs);
+    if(slideSteps===0 && !canExit) {
+      el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake');
+      return;
+    }
+    a.path.forEach(p=>gridMap[p.r][p.c]=null);
+    const delta=DIR_DELTA[a.dir];
+    const newPath=a.path.map(p=>({r:p.r+delta.r*slideSteps,c:p.c+delta.c*slideSteps}));
+    const newTl=pigTopLeft(newPath);
+    const newRay=getPigRay(newTl.r,newTl.c,a.dir);
+    if(canExit) {
+      currentAnimals=currentAnimals.filter(i=>i.id!==a.id);
+      await animateSheepExit(a,el);
+      await autoRemoveChickens();
+      if(currentAnimals.length===0) updateLog('🎉 通关！','#00ffcc');
+    } else {
+      newPath.forEach(p=>gridMap[p.r][p.c]=a.id);
+      await animateSheepSlide(a,el,newPath,slideSteps);
+      a.path=newPath; a.ray=newRay;
+      await autoRemoveChickens();
+    }
+    return;
+  }
+
+  // ===== 普通羊/炸弹羊/自爆羊 =====
+  // 计算射线上连续空格数（直到第一个阻挡物或边界）
+  let slideSteps = 0;
+  for(const rc of a.ray) {
+    if(gridMap[rc.r][rc.c]===null) slideSteps++;
+    else break;
+  }
+  const canExit = (slideSteps === a.ray.length); // 射线全空 → 可以滑出地图
+
+  if(slideSteps===0 && !canExit) {
+    // 头部紧贴阻挡物，无法移动
+    // 若自身是炸弹羊，被点击时扣次数
+    if(a.type==='bomb') { await triggerBomb(a); return; }
+    // 若阻挡物是炸弹羊，也扣次数
+    const blocker = (() => {
+      const rc = a.ray[0];
+      if(!rc) return null;
+      const bid = gridMap[rc.r][rc.c];
+      return bid!==null ? currentAnimals.find(x=>x.id===bid&&x.type==='bomb') : null;
+    })();
+    if(blocker) { await triggerBomb(blocker); }
+    el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake');
+    return;
+  }
+
+  // 清除旧位置
+  a.path.forEach(p=>gridMap[p.r][p.c]=null);
+
+  if(canExit) {
+    // ===== 滑出地图，消失 =====
+    currentAnimals = currentAnimals.filter(i=>i.id!==a.id);
+    await animateSheepExit(a, el);
+    // 若已无自爆羊，停止倒计时
+    if(!currentAnimals.some(x=>x.type==='timed')) stopTimedCountdown();
+    await autoRemoveChickens();
+    if(currentAnimals.length===0) updateLog('🎉 通关！','#00ffcc');
+  } else {
+    // ===== 向前滑动 slideSteps 格，停住 =====
+    const delta = DIR_DELTA[a.dir];
+    const newPath = a.path.map(p=>({r:p.r+delta.r*slideSteps, c:p.c+delta.c*slideSteps}));
+    const newRay  = getRay(newPath[0].r, newPath[0].c, a.dir);
+
+    // 更新 gridMap
+    newPath.forEach(p=>gridMap[p.r][p.c]=a.id);
+
+    // 滑动动画
+    await animateSheepSlide(a, el, newPath, slideSteps);
+
+    // 更新动物状态
+    a.path = newPath;
+    a.ray  = newRay;
+
+    // 检查停下后是否撞到炸弹羊（射线第一格即是刚才阻挡自己的格子）
+    if(newRay.length>0) {
+      const firstRayCell = newRay[0];
+      const occupantId = gridMap[firstRayCell.r][firstRayCell.c];
+      if(occupantId!==null && occupantId!==a.id) {
+        const occupant = currentAnimals.find(x=>x.id===occupantId&&x.type==='bomb');
+        if(occupant) await triggerBomb(occupant);
+      }
+    }
+
+    await autoRemoveChickens();
+  }
+}
+
+// 羊滑动动画（元素从当前位置平滑移到新位置）
+async function animateSheepSlide(a, el, newPath, slideSteps) {
+  const {left:newLeft, top:newTop} = getSheepStyle({...a, path:newPath});
+  const slideMs = Math.min(350, Math.max(120, slideSteps*130));
+  el.style.transition = `left ${slideMs}ms cubic-bezier(.22,.61,.36,1), top ${slideMs}ms cubic-bezier(.22,.61,.36,1)`;
+  el.style.left = `${newLeft}px`;
+  el.style.top  = `${newTop}px`;
+  await sleep(slideMs+30);
+}
+
+// 羊滑出地图动画
+async function animateSheepExit(a, el) {
+  const delta = DIR_DELTA[a.dir];
+  const {left:curLeft, top:curTop} = getSheepStyle(a);
+  // 猪射线成对存储，实际步数 = ray.length/2；普通羊 = ray.length
+  const raySteps = a.type==='pig' ? a.ray.length/2 : a.ray.length;
+  const totalCells = raySteps + 3; // 射线剩余 + 缓冲
+  const exitMs = Math.max(180, totalCells * 80);
+
+  el.style.transition = `left ${exitMs}ms ease-in, top ${exitMs}ms ease-in, opacity 0.18s ease 0.05s`;
+  el.style.left = `${curLeft + delta.c*totalCells*CELL}px`;
+  el.style.top  = `${curTop  + delta.r*totalCells*CELL}px`;
+  el.style.opacity = '0';
+  await sleep(exitMs+50);
+  el.remove();
+}
+
+// ============================================================
+// 鸡的自动消除
+// ============================================================
+async function silentRemoveChickens() {
+  let changed=true;
+  while(changed) {
+    changed=false;
+    for(let i=currentAnimals.length-1;i>=0;i--) {
+      const a=currentAnimals[i];
+      if(a.type!=='chicken') continue;
+      if(getChickenFreeDir(a,currentAnimals,gridMap)!==null) {
+        a.path.forEach(p=>gridMap[p.r][p.c]=null);
+        currentAnimals.splice(i,1);
+        const el=document.getElementById(`a-${a.id}`);
+        if(el) el.remove();
+        changed=true; break;
+      }
+    }
+  }
+}
+
+async function autoRemoveChickens() {
+  let changed=true;
+  while(changed) {
+    changed=false;
+    for(let i=currentAnimals.length-1;i>=0;i--) {
+      const a=currentAnimals[i];
+      if(a.type!=='chicken') continue;
+      if(getChickenFreeDir(a,currentAnimals,gridMap)!==null) {
+        a.path.forEach(p=>gridMap[p.r][p.c]=null);
+        currentAnimals.splice(i,1);
+        const el=document.getElementById(`a-${a.id}`);
+        if(el){el.classList.add('chicken-escaping');await sleep(400);el.remove();}
+        changed=true; break;
+      }
+    }
+  }
+}
+
+// ============================================================
+// 自动演示
+// ============================================================
+function autoSolve() {
+  isPlaying=false;
+  let running=false;
+  const timer=setInterval(async()=>{
+    if(running) return;
+    // 找一只可以移动消除的羊/猪
+    const target=currentAnimals.find(a=>{
+      if(a.type==='sheep'||a.type==='bomb'||a.type==='timed') {
+        return !a.ray.some(rc=>gridMap[rc.r][rc.c]!==null&&gridMap[rc.r][rc.c]!==a.id);
+      }
+      if(a.type==='pig') {
+        for(let si=0;si<a.ray.length;si+=2) {
+          const c1=a.ray[si],c2=a.ray[si+1];
+          if((gridMap[c1.r][c1.c]!==null&&gridMap[c1.r][c1.c]!==a.id)||(gridMap[c2.r][c2.c]!==null&&gridMap[c2.r][c2.c]!==a.id)) return false;
+        }
+        return true;
+      }
+      return false;
+    });
+    if(target){running=true;isPlaying=true;await tryRemoveSheep(target);isPlaying=false;running=false;}
+    else{clearInterval(timer);isPlaying=true;updateLog('演示结束');}
+  },180);
+}
+
+// ============================================================
+// 可解性校验
+// ============================================================
+function verifyLevel() {
+  if(!currentAnimals.length){updateLog('⚠️ 没有可校验的数据','#ff8800');return;}
+  updateLog('🔍 正在校验...','#ff6600');
+  document.querySelectorAll('.deadlock-highlight').forEach(el=>el.classList.remove('deadlock-highlight'));
+  const simA=currentAnimals.map(a=>({...a,path:[...a.path],ray:[...a.ray]}));
+  const simG=gridMap.map(row=>[...row]);
+  const result=quickSolveCheck(simA,simG);
+  if(result.solved) {
+    updateLog(`✅ 关卡可解！共 ${currentAnimals.length} 只动物`,'#00ff66');
+  } else {
+    updateLog(`❌ 发现死局！部分动物无法消除`,'#ff0000');
+    // 重新模拟，找出卡住的动物
+    const sim2=currentAnimals.map(a=>({...a,path:[...a.path],ray:[...a.ray]}));
+    const g2=gridMap.map(row=>[...row]);
+    let rem=[...sim2],maxIter=sim2.length*3,iter=0;
+    while(rem.length>0&&iter<maxIter){
+      iter++;let found=false;
+      for(let i=rem.length-1;i>=0;i--){
+        const a=rem[i];
+        let ok;
+        if(a.type==='sheep'||a.type==='bomb'||a.type==='timed') {
+          ok=!a.ray.some(rc=>g2[rc.r][rc.c]!==null&&g2[rc.r][rc.c]!==a.id);
+        } else if(a.type==='pig') {
+          ok=true;
+          for(let si=0;si<a.ray.length;si+=2){
+            const c1=a.ray[si],c2=a.ray[si+1];
+            if((g2[c1.r][c1.c]!==null&&g2[c1.r][c1.c]!==a.id)||(g2[c2.r][c2.c]!==null&&g2[c2.r][c2.c]!==a.id)){ok=false;break;}
+          }
+        } else {
+          ok=getChickenFreeDir(a,rem,g2)!==null;
+        }
+        if(ok){a.path.forEach(p=>g2[p.r][p.c]=null);rem.splice(i,1);found=true;break;}
+      }
+      if(!found)break;
+    }
+    rem.forEach(a=>{const el=document.getElementById(`a-${a.id}`);if(el)el.classList.add('deadlock-highlight');});
+  }
+}
+
+// ============================================================
+// 禁区管理
+// ============================================================
+function toggleBlockMode() {
+  blockMode=!blockMode;
+  const btn=document.getElementById('btn-block-mode');
+  if(blockMode){btn.classList.add('active');updateLog('🚫 禁区选择模式','#9933ff');createCellOverlays();}
+  else{btn.classList.remove('active');updateLog('已退出禁区模式','#ffcc00');removeCellOverlays();}
+}
+function clearBlockedCells(){blockedCells.clear();renderBlockedCells();updateLog('已清除所有禁区','#ff4444');}
+function fillEmptyCellsAsBlocked(){
+  if(!gridMap.length){updateLog('⚠️ 请先初始化地图','#ff8800');return;}
+  let added=0;
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){const k=`${r},${c}`;if(gridMap[r][c]===null&&!blockedCells.has(k)){blockedCells.add(k);added++;}}
+  renderBlockedCells();
+  if(blockMode)document.querySelectorAll('.cell-overlay').forEach(o=>{if(blockedCells.has(`${o.dataset.r},${o.dataset.c}`))o.classList.add('blocked');});
+  updateLog(`⬛ 已填充 ${added} 个空格为禁区`,'#9933ff');
+}
+function createCellOverlays(){
+  const board=document.getElementById('game-board');removeCellOverlays();
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+    const o=document.createElement('div');o.className='cell-overlay';
+    o.style.cssText=`left:${c*CELL}px;top:${r*CELL}px;width:${CELL}px;height:${CELL}px;`;
+    o.dataset.r=r;o.dataset.c=c;
+    if(blockedCells.has(`${r},${c}`))o.classList.add('blocked');
+    o.addEventListener('mousedown',e=>{e.preventDefault();isMouseDown=true;toggleCellBlock(r,c,o);});
+    o.addEventListener('mouseenter',()=>{if(isMouseDown&&blockMode)toggleCellBlock(r,c,o);});
+    board.appendChild(o);
+  }
+  document.addEventListener('mouseup',()=>{isMouseDown=false;});
+}
+function removeCellOverlays(){document.querySelectorAll('.cell-overlay').forEach(o=>o.remove());}
+function toggleCellBlock(r,c,overlay){
+  const key=`${r},${c}`;
+  if(blockedCells.has(key)){blockedCells.delete(key);overlay.classList.remove('blocked');}
+  else{blockedCells.add(key);overlay.classList.add('blocked');}
+  updateLog(`禁区格子数: ${blockedCells.size}`,'#9933ff');
+}
+function renderBlockedCells(){
+  document.querySelectorAll('.blocked-cell').forEach(b=>b.remove());
+  const board=document.getElementById('game-board');
+  blockedCells.forEach(key=>{
+    const[r,c]=key.split(',').map(Number);
+    const cell=document.createElement('div');cell.className='blocked-cell';
+    cell.style.cssText=`left:${c*CELL+1}px;top:${r*CELL+1}px;width:${CELL-2}px;height:${CELL-2}px;`;
+    board.appendChild(cell);
+  });
+}
+
+// ============================================================
+// 手动绘制模式
+// ============================================================
+function toggleDrawMode(){
+  drawMode=!drawMode;
+  const btn=document.getElementById('btn-draw-mode');
+  if(drawMode){if(blockMode)toggleBlockMode();btn.classList.add('active');updateLog('✏️ 绘制：点击/拖动选择格子','#3399ff');createDrawOverlays();}
+  else{btn.classList.remove('active');updateLog('已退出绘制模式','#ffcc00');removeDrawOverlays();clearDrawingPath();}
+}
+function createDrawOverlays(){
+  const board=document.getElementById('game-board');removeDrawOverlays();
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+    const o=document.createElement('div');o.className='draw-overlay';
+    o.style.cssText=`left:${c*CELL}px;top:${r*CELL}px;width:${CELL}px;height:${CELL}px;`;
+    o.dataset.r=r;o.dataset.c=c;
+    const isB=isBlocked(r,c);
+    if(isB){o.style.background='rgba(255,0,0,.15)';o.style.pointerEvents='none';}
+    else if(gridMap[r][c]!==null){o.style.background='rgba(255,200,0,.2)';o.style.outline='1px dashed #ffaa00';}
+    o.addEventListener('mousedown',e=>{e.preventDefault();if(isB)return;isMouseDown=true;addToDrawPath(r,c,o);});
+    o.addEventListener('mouseenter',()=>{if(isMouseDown&&drawMode&&!isB)addToDrawPath(r,c,o);});
+    board.appendChild(o);
+  }
+  document.addEventListener('mouseup',finishDrawing);
+}
+function removeDrawOverlays(){document.querySelectorAll('.draw-overlay').forEach(o=>o.remove());document.removeEventListener('mouseup',finishDrawing);}
+function addToDrawPath(r,c,overlay){
+  if(currentDrawingPath.some(p=>p.r===r&&p.c===c))return;
+  if(currentDrawingPath.length>0){const l=currentDrawingPath[currentDrawingPath.length-1];if(Math.abs(l.r-r)+Math.abs(l.c-c)!==1)return;}
+  if(gridMap[r][c]!==null){updateLog('⚠️ 此格子已有动物','#ff8800');return;}
+  currentDrawingPath.push({r,c});
+  overlay.style.background='rgba(51,153,255,.5)';overlay.style.outline='2px solid #3399ff';
+  updateLog(`✏️ 绘制中：${currentDrawingPath.length} 格`,'#3399ff');
+}
+function finishDrawing(){
+  if(!drawMode||!currentDrawingPath.length)return;
+  isMouseDown=false;
+  const drawType=document.getElementById('draw-type').value;
+  const path=[...currentDrawingPath];
+  if(drawType==='chicken'){
+    if(path.length!==1){updateLog('⚠️ 鸡只能是1格','#ff8800');clearDrawingPath();return;}
+    if(validateAndStore(path,'chicken',null)){renderAnimal(currentAnimals[currentAnimals.length-1]);updateLog(`✅ 已添加第 ${currentAnimals.length} 只鸡`,'#00ff66');}
+    else updateLog('⚠️ 无效位置（会产生死锁）','#ff8800');
+  } else if(drawType==='pig') {
+    if(path.length!==4){updateLog('⚠️ 猪必须是2×2格（选4个相邻格）','#ff8800');clearDrawingPath();return;}
+    const rs=[...new Set(path.map(p=>p.r))].sort((a,b)=>a-b);
+    const cs=[...new Set(path.map(p=>p.c))].sort((a,b)=>a-b);
+    if(rs.length!==2||cs.length!==2||rs[1]-rs[0]!==1||cs[1]-cs[0]!==1){updateLog('⚠️ 猪须选2×2正方形','#ff8800');clearDrawingPath();return;}
+    const dir=document.getElementById('draw-direction').value;
+    if(validateAndStore(path,'pig',dir)){
+      renderAnimal(currentAnimals[currentAnimals.length-1]);
+      updateLog(`✅ 已添加第 ${currentAnimals.length} 只猪`,'#00ff66');
+    } else updateLog('⚠️ 无效位置（会产生死锁）','#ff8800');
+  } else {
+    const animalType = drawType==='bomb'?'bomb':drawType==='timed'?'timed':'sheep';
+    const label = animalType==='bomb'?'炸弹羊':animalType==='timed'?'自爆羊':'羊';
+    if(path.length!==2){updateLog(`⚠️ ${label}必须是2格直线`,'#ff8800');clearDrawingPath();return;}
+    const dir=getDirFromPath(path);
+    if(!dir){updateLog('⚠️ 路径必须是直线','#ff8800');clearDrawingPath();return;}
+    if(validateAndStore(path,animalType,dir)){
+      renderAnimal(currentAnimals[currentAnimals.length-1]);
+      startTimedCountdown(); // 若新加的是自爆羊，确保倒计时已启动
+      updateLog(`✅ 已添加第 ${currentAnimals.length} 只${label}`,'#00ff66');
+    }
+    else updateLog('⚠️ 无效位置（会产生死锁）','#ff8800');
+  }
+  clearDrawingPath();
+}
+function clearDrawingPath(){
+  currentDrawingPath=[];
+  document.querySelectorAll('.draw-overlay').forEach(o=>{
+    const r=parseInt(o.dataset.r),c=parseInt(o.dataset.c);
+    if(gridMap[r][c]===null&&!isBlocked(r,c)){o.style.background='';o.style.outline='';}
+  });
+}
+
+// ============================================================
+// 导出 / 导入
+// ============================================================
+function exportLevel(){
+  if(!currentAnimals.length){updateLog('⚠️ 没有可导出的数据','#ff8800');return;}
+  const levelId=parseInt(document.getElementById('input-level-id').value)||1;
+  const data={Level:levelId,MapSize:[rows,cols],Animals:currentAnimals.map(a=>{
+    const obj={Id:a.id,Dir:a.dir||null,Path:a.path.map(p=>`${p.r}_${p.c}`),Color:a.color};
+    if(a.type==='bomb') obj.BombCount=a.bombCount;
+    if(a.type==='timed') obj.TimedSec=a.timedSec;
+    if(a.type==='pig') obj.IsPig=true;
+    return obj;
+  })};
+  showModal('export',JSON.stringify(data,null,2),levelId);
+}
+function showModal(type,jsonStr,levelId){
+  const overlay=document.createElement('div');
+  overlay.id=`${type}-overlay`;
+  overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.8);z-index:1000;display:flex;justify-content:center;align-items:center;';
+  const modal=document.createElement('div');
+  modal.style.cssText='background:#1a1a2e;border-radius:12px;padding:20px;max-width:600px;width:90%;max-height:80vh;border:1px solid #333;box-shadow:0 0 30px rgba(0,200,100,.3);';
+  if(type==='export'){
+    modal.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;"><h3 style="margin:0;color:#00ff66;">📤 关卡 ${levelId} JSON数据</h3><button onclick="closeModal('export')" style="background:#555;color:#fff;border:none;border-radius:4px;padding:5px 10px;cursor:pointer;">✕</button></div><textarea id="export-textarea" readonly style="width:100%;height:300px;background:#0d0e15;color:#e0e0e0;border:1px solid #333;border-radius:6px;padding:10px;font-family:monospace;font-size:12px;resize:vertical;box-sizing:border-box;">${jsonStr}</textarea><div style="margin-top:15px;display:flex;gap:10px;justify-content:flex-end;"><button onclick="copyJson()" style="background:#00cc66;color:#fff;border:none;border-radius:6px;padding:10px 20px;cursor:pointer;font-weight:bold;">📋 复制</button><button onclick="closeModal('export')" style="background:#555;color:#fff;border:none;border-radius:6px;padding:10px 20px;cursor:pointer;">关闭</button></div>`;
+  } else {
+    modal.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;"><h3 style="margin:0;color:#2196f3;">📥 导入关卡JSON</h3><button onclick="closeModal('import')" style="background:#555;color:#fff;border:none;border-radius:4px;padding:5px 10px;cursor:pointer;">✕</button></div><div style="margin-bottom:15px;"><button onclick="document.getElementById('json-upload').click()" style="background:#2196f3;color:#fff;border:none;border-radius:6px;padding:10px 20px;cursor:pointer;font-weight:bold;">📁 选择JSON文件</button></div><textarea id="import-textarea" placeholder="或直接粘贴JSON..." style="width:100%;height:250px;background:#0d0e15;color:#e0e0e0;border:1px solid #333;border-radius:6px;padding:10px;font-family:monospace;font-size:12px;resize:vertical;box-sizing:border-box;"></textarea><div style="margin-top:15px;display:flex;gap:10px;justify-content:flex-end;"><button onclick="importFromText()" style="background:#4caf50;color:#fff;border:none;border-radius:6px;padding:10px 20px;cursor:pointer;font-weight:bold;">✅ 导入</button><button onclick="closeModal('import')" style="background:#555;color:#fff;border:none;border-radius:6px;padding:10px 20px;cursor:pointer;">关闭</button></div>`;
+  }
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click',e=>{if(e.target===overlay)closeModal(type);});
+}
+function closeModal(type){const o=document.getElementById(`${type}-overlay`);if(o)o.remove();}
+function copyJson(){const ta=document.getElementById('export-textarea');ta.select();document.execCommand('copy');updateLog('✅ JSON已复制','#00ff66');}
+function showImportModal(){showModal('import','',null);}
+function handleJsonUpload(event){const file=event.target.files[0];if(!file)return;const r=new FileReader();r.onload=e=>{document.getElementById('import-textarea').value=e.target.result;importFromText();};r.readAsText(file);event.target.value='';}
+function importFromText(){
+  const text=document.getElementById('import-textarea').value.trim();
+  if(!text){updateLog('⚠️ 请输入JSON','#ff8800');return;}
+  let data;try{data=JSON.parse(text);}catch(e){updateLog('⚠️ JSON格式错误','#ff8800');return;}
+  if(!data.MapSize||!Array.isArray(data.Animals)){updateLog('⚠️ 格式不正确（需要MapSize和Animals）','#ff8800');return;}
+  closeModal('import');
+  importLevel(data);
+}
+async function importLevel(data){
+  updateLog('📥 正在导入...','#2196f3');
+  rows=data.MapSize[0];cols=data.MapSize[1];
+  document.getElementById('input-rows').value=rows;document.getElementById('input-cols').value=cols;
+  CELL=50;
+  const board=document.getElementById('game-board');
+  board.style.width=`${cols*CELL}px`;board.style.height=`${rows*CELL}px`;
+  board.style.backgroundSize=`${CELL}px ${CELL}px`;
+  board.style.backgroundImage=`linear-gradient(to right,#2a2a3a 1px,transparent 1px),linear-gradient(to bottom,#2a2a3a 1px,transparent 1px)`;
+  board.innerHTML='';
+  gridMap=Array.from({length:rows},()=>Array(cols).fill(null));
+  currentAnimals=[];blockedCells.clear();isPlaying=true;
+  const parsePos=s=>{const[r,c]=s.split('_').map(Number);return{r,c};};
+  for(const ad of data.Animals){
+    const newId=currentAnimals.length,path=ad.Path.map(parsePos),dir=ad.Dir||null;
+    const type=path.length===1?'chicken':ad.IsPig?'pig':(ad.BombCount!==undefined?'bomb':ad.TimedSec!==undefined?'timed':'sheep');
+    const ray=(type==='sheep'||type==='bomb'||type==='timed')?getRay(path[0].r,path[0].c,dir)
+             :type==='pig'?getPigRay(pigTopLeft(path).r,pigTopLeft(path).c,dir):[];
+    const defColor=type==='bomb'?BOMB_COLOR:type==='timed'?TIMED_COLOR:type==='pig'?PIG_COLOR:NEON_COLORS[newId%NEON_COLORS.length];
+    const animal={id:newId,type,dir,path,ray,color:ad.Color||defColor};
+    if(type==='bomb') animal.bombCount=ad.BombCount!=null?ad.BombCount:3;
+    if(type==='timed') animal.timedSec=ad.TimedSec!=null?ad.TimedSec:TIMED_INIT_SEC;
+    currentAnimals.push(animal);
+    path.forEach(p=>gridMap[p.r][p.c]=newId);
+  }
+  updateLog(`📥 导入 ${currentAnimals.length} 只动物，播放动画...`,'#2196f3');
+  const layers=groupByLayer(currentAnimals);
+  const layerMs=Math.max(60,1500/Math.max(layers.length,1));
+  for(const layer of layers)await Promise.all(layer.map(a=>renderAnimalAnim(a,layerMs)));
+  await silentRemoveChickens();
+  startTimedCountdown();
+  updateLog(`✅ 导入完毕，共 ${currentAnimals.length} 只动物`,'#00ff66');
+}
+
+// ============================================================
+// 形状生成
+// ============================================================
+function toggleShapeMode(){
+  shapeMode=!shapeMode;
+  const panel=document.getElementById('shape-panel'),btn=document.getElementById('btn-shape-mode');
+  if(shapeMode){panel.style.display='flex';btn.classList.add('active');clearShapePreview();}
+  else{panel.style.display='none';btn.classList.remove('active');currentShapeMask=null;}
+}
+function clearShapePreview(){const canvas=document.getElementById('shape-preview-canvas');canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);currentShapeMask=null;}
+function generateFromText(){
+  const text=document.getElementById('shape-text').value.trim();if(!text){updateLog('⚠️ 请输入文字或Emoji','#ff8800');return;}
+  updateLog('🎨 正在生成形状...','#e91e63');
+  const canvas=document.createElement('canvas');canvas.width=canvas.height=200;
+  const ctx=canvas.getContext('2d');ctx.fillStyle='#000';ctx.fillRect(0,0,200,200);ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';
+  const fs=text.length===1?150:text.length<=3?80:50;ctx.font=`bold ${fs}px Arial,"Segoe UI Emoji","Apple Color Emoji",sans-serif`;ctx.fillText(text,100,100);
+  generateShapeMaskFromCanvas(canvas);
+}
+function generateFromSvgCode(){const svgCode=document.getElementById('svg-code-input').value.trim();if(!svgCode){updateLog('⚠️ 请粘贴SVG代码','#ff8800');return;}if(!svgCode.includes('<svg')&&!svgCode.includes('<?xml')){updateLog('⚠️ 无效SVG代码','#ff8800');return;}updateLog('🎨 处理SVG中...','#e91e63');renderSvgToCanvas(svgCode);}
+function handleSvgUpload(event){const file=event.target.files[0];if(!file)return;updateLog('🎨 处理SVG...','#e91e63');const reader=new FileReader();reader.onload=e=>renderSvgToCanvas(e.target.result);reader.readAsText(file);event.target.value='';}
+function renderSvgToCanvas(svgContent){
+  const canvas=document.createElement('canvas');canvas.width=canvas.height=200;
+  const ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,200,200);
+  const img=new Image();const blob=new Blob([svgContent],{type:'image/svg+xml;charset=utf-8'});const url=URL.createObjectURL(blob);
+  img.onload=()=>{let w=img.width||128,h=img.height||128;if(w<=0)w=128;if(h<=0)h=128;const pad=10,avail=200-pad*2,scale=Math.min(avail/w,avail/h);const x=(200-w*scale)/2,y=(200-h*scale)/2;ctx.drawImage(img,x,y,w*scale,h*scale);URL.revokeObjectURL(url);generateShapeMaskFromCanvas(canvas,true);};
+  img.onerror=()=>{updateLog('⚠️ SVG加载失败','#ff8800');URL.revokeObjectURL(url);};img.src=url;
+}
+function generateShapeMaskFromCanvas(sourceCanvas,detectDark=false){
+  const tR=parseInt(document.getElementById('input-rows').value)||8,tC=parseInt(document.getElementById('input-cols').value)||8;
+  const ctx=sourceCanvas.getContext('2d'),{data:px}=ctx.getImageData(0,0,sourceCanvas.width,sourceCanvas.height);
+  const cellW=sourceCanvas.width/tC,cellH=sourceCanvas.height/tR;
+  let allB=[];for(let i=0;i<px.length;i+=4)if(px[i+3]>128)allB.push((px[i]+px[i+1]+px[i+2])/3);
+  const avgB=allB.length?allB.reduce((a,b)=>a+b,0)/allB.length:128;
+  const mask=[];
+  for(let r=0;r<tR;r++){const row=[];for(let c=0;c<tC;c++){
+    const sx=Math.floor(c*cellW),sy=Math.floor(r*cellH),ex=Math.floor((c+1)*cellW),ey=Math.floor((r+1)*cellH);
+    let totalB=0,opaque=0,transp=0;
+    for(let py=sy;py<ey;py++)for(let px2=sx;px2<ex;px2++){const idx=(py*sourceCanvas.width+px2)*4;if(px[idx+3]>128){totalB+=(px[idx]+px[idx+1]+px[idx+2])/3;opaque++;}else transp++;}
+    const total=opaque+transp;let isShape=false;
+    if(detectDark){if(opaque>total*.3){const avg=totalB/opaque;isShape=avg<Math.min(200,avgB+30);}}
+    else{if(opaque>total*.3){isShape=(totalB/opaque)>50;}}
+    row.push(isShape);}mask.push(row);}
+  currentShapeMask=mask;renderShapePreview(mask,tR,tC);
+  let sc=0;for(let r=0;r<tR;r++)for(let c=0;c<tC;c++)if(mask[r][c])sc++;
+  if(!sc)updateLog('⚠️ 未能识别形状','#ff8800');else updateLog(`✅ 形状已生成 (${tR}x${tC})，共 ${sc} 格`,'#00ff66');
+}
+function renderShapePreview(mask,tR,tC){
+  const canvas=document.getElementById('shape-preview-canvas');const sz=Math.min(200/Math.max(tR,tC),20);canvas.width=tC*sz;canvas.height=tR*sz;
+  const ctx=canvas.getContext('2d');ctx.fillStyle='#0d0e15';ctx.fillRect(0,0,canvas.width,canvas.height);
+  for(let r=0;r<tR;r++)for(let c=0;c<tC;c++)if(mask[r][c]){ctx.fillStyle='#e91e63';ctx.fillRect(c*sz+1,r*sz+1,sz-2,sz-2);}
+}
+async function applyShapeMask(){
+  if(!currentShapeMask){updateLog('⚠️ 请先生成形状','#ff8800');return;}
+  const savedMask=currentShapeMask.map(row=>[...row]),tR=savedMask.length,tC=savedMask[0].length;
+  document.getElementById('input-rows').value=tR;document.getElementById('input-cols').value=tC;
+  rows=tR;cols=tC;CELL=50;
+  const board=document.getElementById('game-board');
+  board.style.width=`${cols*CELL}px`;board.style.height=`${rows*CELL}px`;
+  board.style.backgroundSize=`${CELL}px ${CELL}px`;
+  board.style.backgroundImage=`linear-gradient(to right,#2a2a3a 1px,transparent 1px),linear-gradient(to bottom,#2a2a3a 1px,transparent 1px)`;
+  board.innerHTML='';gridMap=Array.from({length:rows},()=>Array(cols).fill(null));currentAnimals=[];isPlaying=true;
+  blockedCells.clear();for(let r=0;r<rows;r++)for(let c=0;c<cols;c++)if(!savedMask[r][c])blockedCells.add(`${r},${c}`);
+  let avail=0;for(let r=0;r<rows;r++)for(let c=0;c<cols;c++)if(savedMask[r][c])avail++;
+  toggleShapeMode();updateLog(`🎨 正在生成形状关卡... (${avail} 个可用格子)`,'#e91e63');
+  renderBlockedCells();await sleep(10);
+  let failCount=0,totalAttempts=0,maxAttempts=avail*4;
+  while(failCount<40&&totalAttempts<maxAttempts){totalAttempts++;const ok=await performSingleAdd(false);if(ok)failCount=0;else failCount++;if(currentAnimals.length%5===0)await sleep(0);}
+  if(!currentAnimals.length){updateLog('⚠️ 未能生成动物，请尝试更大的地图','#ff8800');return;}
+  updateLog(`🎨 已生成 ${currentAnimals.length} 只动物，播放入场动画...`,'#e91e63');
+  const layers=groupByLayer(currentAnimals);const layerMs=Math.max(60,1500/Math.max(layers.length,1));
+  for(const layer of layers)await Promise.all(layer.map(a=>renderAnimalAnim(a,layerMs)));
+  await silentRemoveChickens();
+  startTimedCountdown();
+  updateLog(`✅ ${document.getElementById('shape-name').value||'形状'}关卡完成，共 ${currentAnimals.length} 只`,'#00ff66');
+}
+
+// ============================================================
+// 初始化
+// ============================================================
+resetBoard();
+updateLog('请选择禁区或直接生成地图','#ffcc00');
+</script>
+</body>
+</html>
