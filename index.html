@@ -1237,12 +1237,9 @@ function clearDrawingPath(){
 function exportLevel(){
   if(!currentAnimals.length){updateLog('⚠️ 没有可导出的数据','#ff8800');return;}
   const levelId=parseInt(document.getElementById('input-level-id').value)||1;
+  const typeNum={chicken:1,sheep:2,bomb:3,timed:4,pig:5};
   const data={Level:levelId,MapSize:[rows,cols],Animals:currentAnimals.map(a=>{
-    const obj={Id:a.id,Dir:a.dir||null,Path:a.path.map(p=>`${p.r}_${p.c}`),Color:a.color};
-    if(a.type==='bomb') obj.BombCount=a.bombCount;
-    if(a.type==='timed') obj.TimedSec=a.timedSec;
-    if(a.type==='pig') obj.IsPig=true;
-    return obj;
+    return {Id:a.id,Type:typeNum[a.type]||2,Dir:a.dir||null,Path:a.path.map(p=>`${p.r}_${p.c}`),Color:a.color};
   })};
   showModal('export',JSON.stringify(data,null,2),levelId);
 }
@@ -1286,15 +1283,18 @@ async function importLevel(data){
   gridMap=Array.from({length:rows},()=>Array(cols).fill(null));
   currentAnimals=[];blockedCells.clear();isPlaying=true;
   const parsePos=s=>{const[r,c]=s.split('_').map(Number);return{r,c};};
+  const typeMap={1:'chicken',2:'sheep',3:'bomb',4:'timed',5:'pig'};
   for(const ad of data.Animals){
     const newId=currentAnimals.length,path=ad.Path.map(parsePos),dir=ad.Dir||null;
-    const type=path.length===1?'chicken':ad.IsPig?'pig':(ad.BombCount!==undefined?'bomb':ad.TimedSec!==undefined?'timed':'sheep');
+    // 优先用新 Type 字段，兼容旧格式（IsPig / BombCount / TimedSec）
+    const type=ad.Type!=null?typeMap[ad.Type]||'sheep'
+              :path.length===1?'chicken':ad.IsPig?'pig':(ad.BombCount!==undefined?'bomb':ad.TimedSec!==undefined?'timed':'sheep');
     const ray=(type==='sheep'||type==='bomb'||type==='timed')?getRay(path[0].r,path[0].c,dir)
              :type==='pig'?getPigRay(pigTopLeft(path).r,pigTopLeft(path).c,dir):[];
     const defColor=type==='bomb'?BOMB_COLOR:type==='timed'?TIMED_COLOR:type==='pig'?PIG_COLOR:NEON_COLORS[newId%NEON_COLORS.length];
     const animal={id:newId,type,dir,path,ray,color:ad.Color||defColor};
-    if(type==='bomb') animal.bombCount=ad.BombCount!=null?ad.BombCount:3;
-    if(type==='timed') animal.timedSec=ad.TimedSec!=null?ad.TimedSec:TIMED_INIT_SEC;
+    if(type==='bomb') animal.bombCount=3;
+    if(type==='timed') animal.timedSec=TIMED_INIT_SEC;
     currentAnimals.push(animal);
     path.forEach(p=>gridMap[p.r][p.c]=newId);
   }
